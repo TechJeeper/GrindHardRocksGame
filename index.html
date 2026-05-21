@@ -1,0 +1,596 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Grind Hard Rocks! - Mountain Pipeline</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Teko:wght@500&display=swap');
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0a0a0a;
+            color: #fff;
+            font-family: 'Teko', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+        }
+
+        #game-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 1024px;
+            aspect-ratio: 16/9;
+            background: #000;
+            box-shadow: 0 0 40px rgba(0,0,0,1);
+            border: 4px solid #222;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #instructions {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px 15px;
+            border: 1px solid #444;
+            border-radius: 5px;
+            font-size: 16px;
+            line-height: 1.2;
+            pointer-events: none;
+            color: #ddd;
+            z-index: 10;
+            letter-spacing: 1px;
+        }
+
+        @media (max-width: 768px) {
+            #instructions { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-wrapper">
+        <canvas id="gameCanvas" width="1024" height="576"></canvas>
+        <div id="instructions">
+            <span style="color:#FFCC00; font-size: 20px;">OPERATIONS MANUAL:</span><br><br>
+            1. Toggle TEMU CHISEL to mine mountain.<br>
+            2. Tap EXCAVATOR to load the MTV.<br>
+            3. Tap MTV to dispatch to Saw.<br>
+            4. Set SAW SPEED (Low/High).<br>
+            5. Pump WATER to cool Saw.<br>
+            6. Tap BUILD to construct Cabin.
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // --- GAME STATE & VARIABLES ---
+    let gameState = 'START';
+    const GOAL_ROCKS = 1000;
+
+    let brokenRocks = 0;
+    let rawRocksAtSaw = 0;
+    let cutRocks = 0;
+    let cabinBlocks = 0;
+
+    // Entities
+    const chisel = { active: false, broken: false, timer: 0, rate: 30, x: 120, y: 350, angle: 0 };
+    const excavator = { animTimer: 0, x: 230, y: 360 };
+    const mtv = { state: 'IDLE_QUARRY', load: 0, maxLoad: 50, x: 280, y: 420, targetX: 520, quarryX: 280 };
+    const saw = { speed: 0, heat: 0, water: 100, maxWater: 100, overheated: false, timer: 0, bladeAngle: 0, x: 670, y: 380 };
+    const honeybadger = { active: false, x: -100, y: 440, speed: 10, wheelRot: 0 };
+
+    let particles = [];
+    let buttons = [];
+    let popups = [];
+
+    let mouse = { x: 0, y: 0 };
+
+    // --- INPUT HANDLING ---
+    function getMousePos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        if(e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+        return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+    }
+
+    function handleInput(e) {
+        if(e.type === 'touchstart' || e.type === 'touchmove') e.preventDefault();
+        if(e.type === 'mousedown' || e.type === 'touchstart') {
+            const pos = getMousePos(e);
+            mouse.x = pos.x; mouse.y = pos.y;
+            checkInteractions();
+        }
+    }
+
+    canvas.addEventListener('mousedown', handleInput);
+    canvas.addEventListener('touchstart', handleInput, {passive: false});
+
+    function checkInteractions() {
+        if (gameState === 'START') { gameState = 'PLAY'; return; }
+        if (gameState === 'WIN') { resetGame(); return; }
+
+        buttons.forEach(btn => {
+            if (mouse.x >= btn.x && mouse.x <= btn.x + btn.w && mouse.y >= btn.y && mouse.y <= btn.y + btn.h) {
+                btn.action();
+            }
+        });
+    }
+
+    function resetGame() {
+        brokenRocks = 0; rawRocksAtSaw = 0; cutRocks = 0; cabinBlocks = 0;
+        chisel.active = false; chisel.broken = false;
+        mtv.state = 'IDLE_QUARRY'; mtv.load = 0; mtv.x = mtv.quarryX;
+        saw.speed = 0; saw.heat = 0; saw.water = 100; saw.overheated = false;
+        gameState = 'PLAY';
+    }
+
+    // --- GAME LOOP ---
+    function update() {
+        if (gameState !== 'PLAY') return;
+
+        // 1. Chisel Logic
+        if (chisel.active && !chisel.broken) {
+            chisel.timer++;
+            chisel.angle = Math.sin(chisel.timer * 0.8) * 0.1; // rapid vibration
+            if (chisel.timer >= chisel.rate) {
+                brokenRocks += 2;
+                chisel.timer = 0;
+                spawnParticles(chisel.x - 20, chisel.y + 70, '#7b8a8b', 3, 'rock');
+                
+                if (Math.random() < 0.05) { // Break chance
+                    chisel.broken = true; chisel.active = false; chisel.angle = 0.5;
+                    addPopup("NEEDS FIXING!", chisel.x, chisel.y - 20, "#FF4500");
+                }
+            }
+        }
+
+        // 2. Excavator Animation
+        if (excavator.animTimer > 0) excavator.animTimer--;
+
+        // 3. MTV Logic
+        if (mtv.state === 'DRIVING_SAW') {
+            mtv.x += 4;
+            if (mtv.x >= mtv.targetX) mtv.state = 'UNLOADING';
+        } else if (mtv.state === 'UNLOADING') {
+            if (mtv.load > 0) {
+                let drop = Math.min(mtv.load, 2);
+                mtv.load -= drop; rawRocksAtSaw += drop;
+                spawnParticles(mtv.x + 90, mtv.y - 20, '#5b6d6f', 3, 'rock');
+            } else { mtv.state = 'DRIVING_QUARRY'; }
+        } else if (mtv.state === 'DRIVING_QUARRY') {
+            mtv.x -= 4;
+            if (mtv.x <= mtv.quarryX) { mtv.x = mtv.quarryX; mtv.state = 'IDLE_QUARRY'; }
+        }
+
+        // 4. Saw Logic
+        if (saw.speed > 0 && !saw.overheated) {
+            saw.bladeAngle += saw.speed === 1 ? 0.15 : 0.4;
+            
+            if (rawRocksAtSaw > 0) {
+                saw.timer++;
+                let processRate = saw.speed === 1 ? 30 : 15;
+                if (saw.timer >= processRate) {
+                    rawRocksAtSaw--; cutRocks++; saw.timer = 0;
+                    spawnParticles(saw.x - 20, saw.y, '#999', 3, 'rock');
+                    spawnParticles(saw.x, saw.y - 20, '#FFA500', 2, 'spark');
+                }
+            }
+
+            saw.water -= saw.speed === 1 ? 0.08 : 0.2;
+            if (saw.water < 0) saw.water = 0;
+
+            if (saw.water <= 0) saw.heat += saw.speed === 1 ? 0.5 : 1.2;
+            else saw.heat -= 0.3; 
+
+            if (saw.heat < 0) saw.heat = 0;
+            if (saw.heat >= 100) {
+                saw.overheated = true; saw.speed = 0;
+                addPopup("JAMMED!", saw.x, saw.y - 80, "#f00");
+            }
+        } else if (saw.overheated) {
+            saw.heat -= 0.15;
+            if (saw.heat <= 0) saw.overheated = false;
+        }
+
+        // Honeybadger Easter Egg
+        if (!honeybadger.active && Math.random() < 0.0005) {
+            honeybadger.active = true; honeybadger.x = -150;
+        }
+        if (honeybadger.active) {
+            honeybadger.x += honeybadger.speed;
+            honeybadger.wheelRot += 0.5;
+            if (honeybadger.x > 1200) honeybadger.active = false;
+        }
+
+        if (cabinBlocks >= GOAL_ROCKS) {
+            cabinBlocks = GOAL_ROCKS;
+            gameState = 'WIN';
+        }
+
+        updateParticles(); updatePopups();
+    }
+
+    // --- HIGH DETAIL DRAWING ---
+    function draw() {
+        // Sky Gradient
+        let sky = ctx.createLinearGradient(0, 0, 0, 400);
+        sky.addColorStop(0, "#2c3e50");
+        sky.addColorStop(0.5, "#4ca1af");
+        sky.addColorStop(1, "#c4e0e5");
+        ctx.fillStyle = sky;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        drawDetailedMountains();
+
+        // Terrain Base
+        let ground = ctx.createLinearGradient(0, 400, 0, canvas.height);
+        ground.addColorStop(0, "#3e4a3d");
+        ground.addColorStop(1, "#1a2419");
+        ctx.fillStyle = ground;
+        ctx.fillRect(0, 400, canvas.width, canvas.height - 400);
+
+        // Dirt Path
+        ctx.fillStyle = "#4a3b2c";
+        ctx.beginPath();
+        ctx.moveTo(0, 430); ctx.lineTo(canvas.width, 430);
+        ctx.lineTo(canvas.width, 480); ctx.lineTo(0, 470);
+        ctx.fill();
+
+        buttons = []; // Reset UI buttons
+
+        if (gameState === 'START') drawStartScreen();
+        else if (gameState === 'WIN') drawWinScreen();
+        else {
+            drawQuarry();
+            drawEntities();
+            drawUI();
+            drawPopups();
+            drawParticles();
+        }
+    }
+
+    function drawDetailedMountains() {
+        // Back mountains
+        ctx.fillStyle = "#5d6d7e";
+        drawPeakSequence(0, 300, 180, 0.4);
+        
+        // Front mountains with snow
+        ctx.fillStyle = "#34495e";
+        drawPeakSequence(0, 380, 250, 0.7);
+    }
+
+    function drawPeakSequence(startX, baseHeight, peakGap, scale) {
+        ctx.beginPath();
+        ctx.moveTo(startX, 400);
+        for(let i=0; i<10; i++) {
+            let x = startX + i * peakGap;
+            let peakY = baseHeight - (Math.abs(Math.sin(i * 123)) * 150 * scale);
+            ctx.lineTo(x, peakY);
+            
+            // Snow caps
+            if (peakY < 250) {
+                ctx.save();
+                ctx.fillStyle = "#ecf0f1";
+                ctx.beginPath();
+                ctx.moveTo(x, peakY);
+                ctx.lineTo(x - 30*scale, peakY + 40*scale);
+                ctx.lineTo(x, peakY + 50*scale + Math.random()*10);
+                ctx.lineTo(x + 30*scale, peakY + 40*scale);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+        ctx.lineTo(canvas.width, 400);
+        ctx.fill();
+    }
+
+    function drawQuarry() {
+        ctx.save();
+        // Base Mountain Rock
+        let rockGrad = ctx.createLinearGradient(0, 100, 200, 430);
+        rockGrad.addColorStop(0, "#7f8c8d");
+        rockGrad.addColorStop(1, "#2c3e50");
+        ctx.fillStyle = rockGrad;
+        
+        ctx.beginPath();
+        ctx.moveTo(0, 450); ctx.lineTo(0, 150); ctx.lineTo(60, 180);
+        ctx.lineTo(100, 250); ctx.lineTo(160, 320); ctx.lineTo(200, 450);
+        ctx.fill();
+
+        // Cracks and details
+        ctx.strokeStyle = "#1a252f";
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(40, 200); ctx.lineTo(70, 260); ctx.lineTo(140, 300); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(80, 260); ctx.lineTo(100, 350); ctx.stroke();
+        
+        // Pile of broken rocks
+        if (brokenRocks > 0) {
+            ctx.fillStyle = "#95a5a6";
+            ctx.beginPath();
+            ctx.arc(160, 430, Math.min(40, 10 + brokenRocks), Math.PI, 0);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    function drawEntities() {
+        drawChisel();
+        drawExcavator();
+        drawMTV();
+        drawSaw();
+        drawHoneybadger();
+        drawCabin();
+    }
+
+    function drawChisel() {
+        ctx.save();
+        ctx.translate(chisel.x, chisel.y);
+        ctx.rotate(chisel.angle);
+        
+        // Base Unit
+        ctx.fillStyle = "#d35400"; // Orange industrial
+        ctx.beginPath(); ctx.moveTo(-10, -20); ctx.lineTo(30, -20); ctx.lineTo(40, 10); ctx.lineTo(-10, 10); ctx.fill();
+        ctx.fillStyle = "#222"; ctx.fillRect(0, -15, 20, 10); // Vents
+
+        // Arm Pivot
+        ctx.beginPath(); ctx.arc(35, -5, 8, 0, Math.PI*2); ctx.fill();
+
+        // Arm
+        ctx.fillStyle = "#e67e22";
+        ctx.translate(35, -5);
+        ctx.rotate(0.5); // point down-left towards rock
+        ctx.fillRect(0, -5, 60, 10);
+
+        // Jackhammer Head
+        ctx.translate(60, 0);
+        ctx.fillStyle = "#7f8c8d";
+        ctx.fillRect(-10, -10, 20, 20); // housing
+        ctx.fillStyle = "#34495e";
+        
+        // Bit (moves if active)
+        let bitExtension = (chisel.active && !chisel.broken && chisel.timer % 4 < 2) ? 15 : 0;
+        ctx.fillRect(-3, 10, 6, 20 + bitExtension);
+        
+        if (chisel.broken) {
+            ctx.fillStyle = "rgba(0,0,0,0.5)";
+            ctx.fillRect(-15, -15, 30, 30); // burnt look
+        }
+
+        ctx.restore();
+    }
+
+    function drawExcavator() {
+        ctx.save();
+        ctx.translate(excavator.x, excavator.y);
+        
+        // Tracks
+        ctx.fillStyle = "#111";
+        ctx.beginPath(); ctx.roundRect(-25, 45, 70, 20, 10) || ctx.rect(-25, 45, 70, 20); ctx.fill();
+        ctx.fillStyle = "#333";
+        for(let i=-20; i<40; i+=10) ctx.fillRect(i, 45, 5, 20); // tread lines
+
+        // Undercarriage
+        ctx.fillStyle = "#222";
+        ctx.fillRect(-10, 35, 40, 10);
+
+        // Cab / Body
+        ctx.fillStyle = "#f1c40f"; // Yellow
+        ctx.beginPath(); ctx.moveTo(-20, 35); ctx.lineTo(30, 35); ctx.lineTo(40, 5); ctx.lineTo(-10, 5); ctx.fill();
+        ctx.fillStyle = "#2c3e50"; // Window
+        ctx.beginPath(); ctx.moveTo(0, 30); ctx.lineTo(25, 30); ctx.lineTo(30, 10); ctx.lineTo(5, 10); ctx.fill();
+
+        // Boom Arm Joint
+        ctx.fillStyle = "#222";
+        ctx.beginPath(); ctx.arc(20, 20, 10, 0, Math.PI*2); ctx.fill();
+
+        // Boom (Animated)
+        let armRot = excavator.animTimer > 0 ? -0.4 : 0;
+        ctx.translate(20, 20);
+        ctx.rotate(armRot);
+        
+        ctx.lineWidth = 12;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "#f39c12"; // Darker yellow
+        
+        // Draw angled boom
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        ctx.lineTo(40, -30); // Boom up
+        ctx.lineTo(70, 10);  // Stick down
+        ctx.stroke();
+
+        // Joints
+        ctx.fillStyle = "#333";
+        ctx.beginPath(); ctx.arc(40, -30, 6, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(70, 10, 6, 0, Math.PI*2); ctx.fill();
+
+        // Bucket
+        ctx.translate(70, 10);
+        let bucketRot = excavator.animTimer > 0 ? 0.5 : 0;
+        ctx.rotate(bucketRot);
+        ctx.fillStyle = "#7f8c8d";
+        ctx.beginPath();
+        ctx.moveTo(-10, -5); ctx.lineTo(15, -5); ctx.lineTo(20, 20); 
+        ctx.lineTo(-5, 25); ctx.closePath();
+        ctx.fill();
+        // Teeth
+        ctx.fillStyle = "#bdc3c7";
+        ctx.fillRect(15, 15, 8, 4); ctx.fillRect(13, 20, 8, 4);
+
+        ctx.restore();
+    }
+
+    function drawMTV() {
+        ctx.save();
+        ctx.translate(mtv.x, mtv.y);
+        
+        // Shadow
+        ctx.fillStyle = "rgba(0,0,0,0.4)";
+        ctx.beginPath(); ctx.ellipse(40, 20, 60, 10, 0, 0, Math.PI*2); ctx.fill();
+
+        // Chassis
+        ctx.fillStyle = "#2c3e50";
+        ctx.fillRect(0, -5, 100, 8);
+
+        // Cab (Military Style)
+        ctx.fillStyle = "#4a5320"; // Olive Drab
+        ctx.beginPath(); 
+        ctx.moveTo(0, -5); ctx.lineTo(0, -35); ctx.lineTo(25, -35); 
+        ctx.lineTo(35, -5); ctx.fill();
+        // Window
+        ctx.fillStyle = "#87CEEB";
+        ctx.beginPath(); ctx.moveTo(5, -10); ctx.lineTo(5, -30); ctx.lineTo(22, -30); ctx.lineTo(28, -10); ctx.fill();
+
+        // Exhaust
+        ctx.fillStyle = "#7f8c8d"; ctx.fillRect(25, -45, 5, 15);
+        if (mtv.state !== 'IDLE_QUARRY' && mtv.state !== 'UNLOADING') {
+            spawnParticles(mtv.x + 27, mtv.y - 45, '#333', 1, 'smoke');
+        }
+
+        // Dump Bed (Animated)
+        let bedAngle = mtv.state === 'UNLOADING' ? -0.4 : 0;
+        ctx.translate(35, -5);
+        ctx.rotate(bedAngle);
+        
+        ctx.fillStyle = "#3e4722"; // Darker olive
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.lineTo(65, 0); ctx.lineTo(70, -30); ctx.lineTo(-10, -30); ctx.fill();
+        // Side ridges
+        ctx.fillStyle = "#2a3015";
+        ctx.fillRect(10, -25, 5, 20); ctx.fillRect(30, -25, 5, 20); ctx.fillRect(50, -25, 5, 20);
+
+        // Rocks in bed
+        if (mtv.load > 0) {
+            ctx.fillStyle = "#7f8c8d";
+            let h = (mtv.load / mtv.maxLoad) * 20;
+            ctx.fillRect(5, -30 - h, 55, h);
+            // Jagged top
+            ctx.beginPath(); ctx.moveTo(5, -30-h); ctx.lineTo(20, -35-h); ctx.lineTo(40, -28-h); ctx.lineTo(60, -30-h); ctx.fill();
+        }
+
+        ctx.rotate(-bedAngle);
+        ctx.translate(-35, 5);
+
+        // Wheels (6x6)
+        drawWheel(10, 5, mtv.x); drawWheel(60, 5, mtv.x); drawWheel(85, 5, mtv.x);
+
+        ctx.restore();
+    }
+
+    function drawWheel(x, y, rotationBase) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(rotationBase * 0.1);
+        ctx.fillStyle = "#111";
+        ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = "#333"; // Rim
+        ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI*2); ctx.fill();
+        // Treads
+        ctx.fillStyle = "#555";
+        for(let i=0; i<6; i++) {
+            ctx.fillRect(8, -2, 4, 4);
+            ctx.rotate(Math.PI/3);
+        }
+        ctx.restore();
+    }
+
+    function drawSaw() {
+        ctx.save();
+        ctx.translate(saw.x, saw.y);
+        
+        // Base / Frame
+        ctx.fillStyle = "#2c3e50";
+        ctx.fillRect(-30, 0, 80, 50);
+        ctx.fillStyle = "#e74c3c"; // Red accent
+        ctx.fillRect(-25, 10, 70, 5);
+        ctx.fillRect(-15, -20, 20, 20); // Motor housing
+
+        // Raw rock pile waiting to be cut
+        if (rawRocksAtSaw > 0) {
+            ctx.fillStyle = "#95a5a6";
+            ctx.fillRect(45, 20, Math.min(30, rawRocksAtSaw * 2), 20);
+        }
+
+        // Circular Blade
+        ctx.translate(-5, -20);
+        ctx.rotate(saw.bladeAngle);
+        
+        // Blade Glow if hot
+        if (saw.heat > 50) {
+            ctx.shadowColor = "#e74c3c";
+            ctx.shadowBlur = (saw.heat - 50) / 2;
+        }
+
+        ctx.fillStyle = saw.overheated ? "#c0392b" : "#bdc3c7";
+        ctx.beginPath(); ctx.arc(0, 0, 45, 0, Math.PI*2); ctx.fill();
+        
+        ctx.shadowBlur = 0; // reset
+        
+        // Inner ring
+        ctx.fillStyle = "#7f8c8d";
+        ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = "#222"; ctx.beginPath(); ctx.arc(0,0,5,0,Math.PI*2); ctx.fill();
+
+        // Sharp Teeth
+        ctx.fillStyle = "#fff";
+        for(let i=0; i<12; i++) {
+            ctx.beginPath(); ctx.moveTo(40, -5); ctx.lineTo(52, -15); ctx.lineTo(45, 5); ctx.fill();
+            ctx.rotate(Math.PI/6);
+        }
+        ctx.restore();
+
+        // Water Cooling System
+        ctx.fillStyle = "#34495e";
+        ctx.fillRect(saw.x + 60, saw.y - 20, 30, 70); // Tank
+        // Glass
+        ctx.fillStyle = "rgba(135, 206, 235, 0.2)";
+        ctx.fillRect(saw.x + 62, saw.y - 18, 26, 66);
+        // Water inside
+        ctx.fillStyle = "#3498db";
+        let waterH = (saw.water / saw.maxWater) * 64;
+        ctx.fillRect(saw.x + 62, saw.y + 48 - waterH, 26, waterH);
+        
+        // Hose to blade
+        ctx.strokeStyle = "#111"; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(saw.x + 60, saw.y + 40); 
+        ctx.quadraticCurveTo(saw.x + 30, saw.y + 50, saw.x, saw.y - 10); ctx.stroke();
+    }
+
+    function drawHoneybadger() {
+        if (!honeybadger.active) return;
+        ctx.save();
+        ctx.translate(honeybadger.x, honeybadger.y);
+        
+        // Frame
+        ctx.fillStyle = "#111";
+        ctx.beginPath(); ctx.moveTo(-20, -10); ctx.lineTo(40, -10); ctx.lineTo(30, 10); ctx.lineTo(-20, 10); ctx.fill();
+        
+        // Roll cage
+        ctx.strokeStyle = "#2ecc71"; // Bright Green
+        ctx.lineWidth = 3;
+ 
