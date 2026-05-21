@@ -70,7 +70,7 @@
         1. Toggle TEMU CHISEL to mine mountain.<br>
         2. Tap EXCAVATOR to load the MTV.<br>
         3. Tap MTV to dispatch to Saw.<br>
-        4. Set SAW SPEED (Low/High).<br>
+        4. Set WIRE SAW SPEED (Low/High).<br>
         5. Pump WATER to cool Saw.<br>
         6. Tap BUILD to construct Cabin.
     </div>
@@ -93,7 +93,7 @@
     const chisel = { active: false, broken: false, timer: 0, rate: 45, x: 120, y: 350, angle: 0 };
     const excavator = { animTimer: 0, x: 230, y: 360 };
     const mtv = { state: 'IDLE_QUARRY', load: 0, maxLoad: 12, x: 280, y: 420, targetX: 520, quarryX: 280 };
-    const saw = { speed: 0, heat: 0, water: 100, maxWater: 100, overheated: false, timer: 0, bladeAngle: 0, x: 670, y: 380 };
+    const saw = { speed: 0, heat: 0, water: 100, maxWater: 100, overheated: false, timer: 0, wireSpeed: 0, progress: 0, x: 630, y: 380 };
     const honeybadger = { active: false, x: -100, y: 440, speed: 10, wheelRot: 0 };
 
     let particles = [];
@@ -188,16 +188,26 @@
 
         // 4. Saw Logic
         if (saw.speed > 0 && !saw.overheated) {
-            saw.bladeAngle += saw.speed === 1 ? 0.15 : 0.4;
+            saw.wireSpeed += saw.speed === 1 ? 0.2 : 0.5;
             
             if (rawRocksAtSaw > 0) {
                 saw.timer++;
-                let processRate = saw.speed === 1 ? 60 : 30; // takes longer to cut a boulder
+                let processRate = saw.speed === 1 ? 360 : 180; // Much slower cut times
+                saw.progress = saw.timer / processRate;
+
                 if (saw.timer >= processRate) {
-                    rawRocksAtSaw--; cutRocks += 5; saw.timer = 0; // 1 boulder yields 5 slabs
-                    spawnParticles(saw.x - 20, saw.y, '#999', 5, 'rock');
-                    spawnParticles(saw.x, saw.y - 20, '#FFA500', 3, 'spark');
+                    rawRocksAtSaw--; cutRocks += 5; saw.timer = 0; saw.progress = 0; // 1 boulder yields 5 slabs
+                    spawnParticles(saw.x + 40, saw.y + 20, '#999', 5, 'rock');
+                    spawnParticles(saw.x + 60, saw.y + 20, '#FFA500', 3, 'spark');
+                } else if (saw.timer % 10 === 0) {
+                    // Sparks during the horizontal wire cut
+                    let assemblyX = 10 + (saw.progress * 60);
+                    if (assemblyX >= 20 && assemblyX <= 60) {
+                        spawnParticles(saw.x + assemblyX, saw.y + 20, '#FFA500', 1, 'spark');
+                    }
                 }
+            } else {
+                saw.progress = 0; // Return wire to start
             }
 
             saw.water -= saw.speed === 1 ? 0.08 : 0.2;
@@ -209,11 +219,14 @@
             if (saw.heat < 0) saw.heat = 0;
             if (saw.heat >= 100) {
                 saw.overheated = true; saw.speed = 0;
-                addPopup("JAMMED!", saw.x, saw.y - 80, "#f00");
+                addPopup("JAMMED!", saw.x + 40, saw.y - 40, "#f00");
             }
         } else if (saw.overheated) {
             saw.heat -= 0.15;
             if (saw.heat <= 0) saw.overheated = false;
+        } else {
+            // slowly return wire to top if stopped or empty
+            if (rawRocksAtSaw === 0 && saw.progress > 0) saw.progress = Math.max(0, saw.progress - 0.02);
         }
 
         // Honeybadger Easter Egg
@@ -260,6 +273,8 @@
         ctx.lineTo(canvas.width, 480); ctx.lineTo(0, 470);
         ctx.fill();
 
+        drawTrees();
+
         buttons = []; // Reset UI buttons
 
         if (gameState === 'START') drawStartScreen();
@@ -274,6 +289,25 @@
     }
 
     function drawDetailedMountains() {
+        // Distant giant mountain peak
+        ctx.fillStyle = "#2c3e50";
+        ctx.beginPath();
+        ctx.moveTo(300, 400);
+        ctx.lineTo(650, 120); // Peak
+        ctx.lineTo(1000, 400);
+        ctx.fill();
+
+        // Snow on distant peak
+        ctx.fillStyle = "#ecf0f1";
+        ctx.beginPath();
+        ctx.moveTo(650, 120);
+        ctx.lineTo(560, 240);
+        ctx.lineTo(600, 230);
+        ctx.lineTo(640, 260);
+        ctx.lineTo(680, 220);
+        ctx.lineTo(720, 250);
+        ctx.fill();
+
         // Back mountains
         ctx.fillStyle = "#5d6d7e";
         drawPeakSequence(0, 300, 180, 0.4);
@@ -284,28 +318,72 @@
     }
 
     function drawPeakSequence(startX, baseHeight, peakGap, scale) {
-        ctx.beginPath();
-        ctx.moveTo(startX, 400);
-        for(let i=0; i<10; i++) {
+        let peaks = [];
+        for(let i=0; i<12; i++) {
             let x = startX + i * peakGap;
             let peakY = baseHeight - (Math.abs(Math.sin(i * 123)) * 150 * scale);
-            ctx.lineTo(x, peakY);
-            
-            // Snow caps
-            if (peakY < 250) {
-                ctx.save();
-                ctx.fillStyle = "#ecf0f1";
-                ctx.beginPath();
-                ctx.moveTo(x, peakY);
-                ctx.lineTo(x - 30*scale, peakY + 40*scale);
-                ctx.lineTo(x, peakY + 50*scale + Math.random()*10);
-                ctx.lineTo(x + 30*scale, peakY + 40*scale);
-                ctx.fill();
-                ctx.restore();
-            }
+            let valleyX = x + peakGap/2;
+            let valleyY = baseHeight + 20 * scale;
+            peaks.push({x: x, y: peakY, vx: valleyX, vy: valleyY});
+        }
+
+        // Draw mountain body completely first
+        ctx.beginPath();
+        ctx.moveTo(startX, 400);
+        for(let i=0; i<peaks.length; i++) {
+            ctx.lineTo(peaks[i].x, peaks[i].y);
+            if(i < peaks.length - 1) ctx.lineTo(peaks[i].vx, peaks[i].vy);
         }
         ctx.lineTo(canvas.width, 400);
         ctx.fill();
+
+        // Draw snow caps safely on top of mountain body
+        ctx.fillStyle = "#ecf0f1";
+        for(let i=0; i<peaks.length; i++) {
+            if (peaks[i].y < 280) { // Check if peak is high enough for snow
+                let px = peaks[i].x;
+                let py = peaks[i].y;
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                ctx.lineTo(px - 30*scale, py + 40*scale);
+                ctx.lineTo(px - 10*scale, py + 50*scale);
+                ctx.lineTo(px + 10*scale, py + 45*scale);
+                ctx.lineTo(px + 30*scale, py + 40*scale);
+                ctx.fill();
+            }
+        }
+    }
+
+    function drawTrees() {
+        drawTree(380, 410, 1.2);
+        drawTree(440, 420, 0.8);
+        drawTree(520, 415, 1.0);
+        drawTree(760, 410, 1.3);
+        drawTree(960, 425, 0.9);
+        drawTree(1000, 415, 1.1);
+    }
+
+    function drawTree(x, y, scale) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(scale, scale);
+
+        // Trunk
+        ctx.fillStyle = "#3e2723";
+        ctx.fillRect(-4, 0, 8, 15);
+
+        // Leaves (Pine style layered)
+        ctx.fillStyle = "#27ae60";
+        ctx.beginPath(); ctx.moveTo(0, -35); ctx.lineTo(15, 5); ctx.lineTo(-15, 5); ctx.fill();
+        ctx.fillStyle = "#2ecc71"; // Highlight
+        ctx.beginPath(); ctx.moveTo(0, -35); ctx.lineTo(0, 5); ctx.lineTo(-15, 5); ctx.fill();
+
+        ctx.fillStyle = "#27ae60";
+        ctx.beginPath(); ctx.moveTo(0, -50); ctx.lineTo(12, -10); ctx.lineTo(-12, -10); ctx.fill();
+        ctx.fillStyle = "#2ecc71";
+        ctx.beginPath(); ctx.moveTo(0, -50); ctx.lineTo(0, -10); ctx.lineTo(-12, -10); ctx.fill();
+
+        ctx.restore();
     }
 
     function drawQuarry() {
@@ -542,79 +620,119 @@
         
         // Base / Frame
         ctx.fillStyle = "#2c3e50";
-        ctx.fillRect(-30, 0, 80, 50);
-        ctx.fillStyle = "#e74c3c"; // Red accent
-        ctx.fillRect(-25, 10, 70, 5);
-        ctx.fillRect(-15, -20, 20, 20); // Motor housing
+        ctx.fillRect(-20, 45, 120, 10); // Base platform
+        
+        // Side tracks for the horizontal wire saw carriage
+        ctx.fillStyle = "#2c3e50";
+        ctx.fillRect(-5, -60, 10, 110); // Left post
+        ctx.fillRect(85, -60, 10, 110); // Right post
+        
+        ctx.fillStyle = "#34495e";
+        ctx.fillRect(0, -50, 90, 10); // Top track
+        ctx.fillRect(0, 35, 90, 10); // Bottom track
 
-        // Massive boulders waiting to be cut
+        // Massive boulders waiting
+        if (rawRocksAtSaw > 1) {
+            ctx.fillStyle = "#95a5a6";
+            ctx.strokeStyle = "#2c3e50";
+            ctx.lineWidth = 2;
+            let displayWait = Math.min(rawRocksAtSaw - 1, 5);
+            for(let i=0; i<displayWait; i++) {
+                ctx.beginPath();
+                let bx = -25 - (i*35);
+                let by = 28;
+                ctx.arc(bx, by, 16, 0, Math.PI*2);
+                ctx.fill(); ctx.stroke();
+            }
+        }
+
+        // Boulder currently being cut
         if (rawRocksAtSaw > 0) {
             ctx.fillStyle = "#95a5a6";
             ctx.strokeStyle = "#2c3e50";
             ctx.lineWidth = 2;
-            let displayWait = Math.min(rawRocksAtSaw, 6);
-            for(let i=0; i<displayWait; i++) {
-                ctx.beginPath();
-                let bx = 55 + (i%2)*12;
-                let by = 35 - Math.floor(i/2)*14;
-                ctx.arc(bx, by, 10, 0, Math.PI*2);
-                ctx.fill();
-                ctx.stroke();
-            }
-            
-            // Boulder currently being cut (right under blade)
             ctx.beginPath();
-            ctx.arc(0, -10, 16, 0, Math.PI*2);
-            ctx.fill();
-            ctx.stroke();
-            // Cut line halfway through
-            ctx.strokeStyle = "#fff";
-            ctx.beginPath(); ctx.moveTo(-10, -25); ctx.lineTo(0, -10); ctx.stroke();
+            ctx.arc(40, 20, 20, 0, Math.PI*2);
+            ctx.fill(); ctx.stroke();
         }
 
-        // Circular Blade
-        ctx.translate(-5, -20);
-        ctx.rotate(saw.bladeAngle);
-        
-        // Blade Glow if hot
-        if (saw.heat > 50) {
+        // The moving cutting wire assembly (moves horizontally)
+        // progress goes 0 to 1.
+        let assemblyX = 10 + (saw.progress * 60);
+
+        // Assembly carriage
+        ctx.fillStyle = "#e74c3c"; // Red accent
+        ctx.fillRect(assemblyX - 10, -55, 20, 20); // Top slider
+        ctx.fillRect(assemblyX - 10, 30, 20, 20); // Bottom slider
+        ctx.fillStyle = "#222";
+        ctx.fillRect(assemblyX - 3, -35, 6, 65); // motor bar
+
+        // Pulleys
+        drawPulley(assemblyX, -40, saw.wireSpeed);
+        drawPulley(assemblyX, 40, saw.wireSpeed);
+
+        // The Wire! (Vertical now, moving horizontally)
+        ctx.strokeStyle = saw.heat > 60 ? "#e74c3c" : "#ecf0f1";
+        ctx.lineWidth = 2;
+        if (saw.heat > 80) {
             ctx.shadowColor = "#e74c3c";
             ctx.shadowBlur = (saw.heat - 50) / 2;
         }
-
-        ctx.fillStyle = saw.overheated ? "#c0392b" : "#bdc3c7";
-        ctx.beginPath(); ctx.arc(0, 0, 45, 0, Math.PI*2); ctx.fill();
-        
+        ctx.beginPath();
+        // Wire connects the pulleys
+        ctx.moveTo(assemblyX, -32);
+        ctx.lineTo(assemblyX, 32);
+        ctx.stroke();
         ctx.shadowBlur = 0; // reset
         
-        // Inner ring
-        ctx.fillStyle = "#7f8c8d";
-        ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle = "#222"; ctx.beginPath(); ctx.arc(0,0,5,0,Math.PI*2); ctx.fill();
-
-        // Sharp Teeth
-        ctx.fillStyle = "#fff";
-        for(let i=0; i<12; i++) {
-            ctx.beginPath(); ctx.moveTo(40, -5); ctx.lineTo(52, -15); ctx.lineTo(45, 5); ctx.fill();
-            ctx.rotate(Math.PI/6);
+        // Draw horizontal cut line in the boulder (if cutting)
+        if (rawRocksAtSaw > 0 && saw.progress > 0) {
+            ctx.strokeStyle = "#111";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            let startCutX = 20; // Left edge of boulder
+            let currentCutX = Math.min(Math.max(assemblyX, 20), 60);
+            if (assemblyX > 20) {
+                ctx.moveTo(startCutX, 20); // Center left
+                ctx.lineTo(currentCutX, 20); // Center right following wire
+                ctx.stroke();
+            }
         }
-        ctx.restore();
 
         // Water Cooling System
         ctx.fillStyle = "#34495e";
-        ctx.fillRect(saw.x + 60, saw.y - 20, 30, 70); // Tank
-        // Glass
+        ctx.fillRect(100, -20, 30, 70); // Tank moved right
         ctx.fillStyle = "rgba(135, 206, 235, 0.2)";
-        ctx.fillRect(saw.x + 62, saw.y - 18, 26, 66);
-        // Water inside
+        ctx.fillRect(102, -18, 26, 66);
         ctx.fillStyle = "#3498db";
         let waterH = (saw.water / saw.maxWater) * 64;
-        ctx.fillRect(saw.x + 62, saw.y + 48 - waterH, 26, waterH);
+        ctx.fillRect(102, 48 - waterH, 26, waterH);
         
-        // Hose to blade
+        // Hose to wire assembly
         ctx.strokeStyle = "#111"; ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.moveTo(saw.x + 60, saw.y + 40); 
-        ctx.quadraticCurveTo(saw.x + 30, saw.y + 50, saw.x, saw.y - 10); ctx.stroke();
+        ctx.beginPath(); 
+        ctx.moveTo(100, 40); 
+        ctx.quadraticCurveTo(80, -40, assemblyX, -40); 
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function drawPulley(x, y, rot) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(rot);
+        ctx.fillStyle = "#7f8c8d";
+        ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = "#222";
+        ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
+        // Spokes
+        ctx.strokeStyle = "#222"; ctx.lineWidth = 2;
+        for(let i=0; i<3; i++) {
+            ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0, -8); ctx.stroke();
+            ctx.rotate(Math.PI * 2 / 3);
+        }
+        ctx.restore();
     }
 
     function drawHoneybadger() {
@@ -737,7 +855,7 @@
         drawGlassButton(765, panelY+15, 110, 60, "#3498db", "PUMP WATER", () => {
             saw.water = Math.min(saw.maxWater, saw.water + 25);
             saw.heat = Math.max(0, saw.heat - 15);
-            spawnParticles(saw.x + 75, saw.y - 20, "#3498db", 8, 'water');
+            spawnParticles(saw.x + 115, saw.y - 20, "#3498db", 8, 'water');
         });
 
         // Build
