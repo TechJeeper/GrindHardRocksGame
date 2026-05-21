@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -593,4 +592,268 @@
         // Roll cage
         ctx.strokeStyle = "#2ecc71"; // Bright Green
         ctx.lineWidth = 3;
- 
+        ctx.beginPath(); ctx.moveTo(-10, -10); ctx.lineTo(0, -30); ctx.lineTo(20, -30); ctx.lineTo(30, -10); ctx.stroke();
+        
+        // Wheels
+        drawWheel(-10, 10, honeybadger.wheelRot);
+        drawWheel(30, 10, honeybadger.wheelRot);
+        
+        ctx.restore();
+    }
+
+    function drawCabin() {
+        let cx = 820;
+        let cy = 440;
+        
+        // Foundation
+        ctx.fillStyle = "#7f8c8d";
+        ctx.fillRect(cx - 10, cy, 180, 15);
+        ctx.fillStyle = "#2c3e50";
+        ctx.fillRect(cx - 10, cy+15, 180, 5);
+
+        // Calculate visual blocks (1 visual = ~10 actual)
+        let visualBlocks = Math.floor((cabinBlocks / GOAL_ROCKS) * 100);
+        
+        let bx = cx;
+        let by = cy - 20;
+        let row = 0;
+
+        for(let i=0; i<visualBlocks; i++) {
+            // Draw a detailed brick
+            ctx.fillStyle = "#95a5a6"; // Gray rock
+            ctx.fillRect(bx, by, 28, 18);
+            
+            // Texture/Highlight
+            ctx.fillStyle = "#bdc3c7"; ctx.fillRect(bx, by, 28, 3);
+            ctx.fillStyle = "#7f8c8d"; ctx.fillRect(bx, by+15, 28, 3);
+            
+            // Mortar line
+            ctx.strokeStyle = "#34495e"; ctx.lineWidth = 1; ctx.strokeRect(bx, by, 28, 18);
+
+            bx += 30;
+            if (bx > cx + 130) {
+                row++;
+                bx = cx + (row % 2 === 0 ? 0 : 15); // Stagger rows
+                by -= 20;
+            }
+        }
+    }
+
+    function drawUI() {
+        // Top HUD Panel
+        ctx.fillStyle = "rgba(10, 10, 10, 0.85)";
+        ctx.beginPath(); ctx.roundRect(10, 10, canvas.width - 20, 60, 10) || ctx.rect(10, 10, canvas.width - 20, 60); ctx.fill();
+        ctx.strokeStyle = "#f39c12"; ctx.lineWidth = 2; ctx.stroke();
+
+        ctx.fillStyle = "#fff";
+        ctx.font = "22px 'Teko', sans-serif";
+        ctx.textAlign = "center";
+        
+        ctx.fillText(`RAW MINED: ${brokenRocks}`, 150, 48);
+        ctx.fillText(`AT SAW: ${rawRocksAtSaw}`, 380, 48);
+        ctx.fillText(`CUT STONES: ${cutRocks}`, 620, 48);
+        
+        ctx.fillStyle = "#2ecc71";
+        ctx.font = "26px 'Teko', sans-serif";
+        ctx.fillText(`CABIN: ${cabinBlocks} / ${GOAL_ROCKS}`, 860, 48);
+
+        // Control Panel (Bottom)
+        let panelY = 480;
+        ctx.fillStyle = "#1a1a1a";
+        ctx.fillRect(0, panelY, canvas.width, 96);
+        ctx.fillStyle = "#2a2a2a";
+        ctx.fillRect(0, panelY, canvas.width, 5); // top bevel
+
+        // Quarry Controls
+        drawGlassButton(20, panelY+15, 140, 60, chisel.broken ? "#c0392b" : (chisel.active ? "#7f8c8d" : "#d35400"), 
+            chisel.broken ? "FIX CHISEL" : (chisel.active ? "CHISEL ON" : "CHISEL OFF"), () => {
+            if (chisel.broken) { chisel.broken = false; chisel.active = true; addPopup("FIXED!", chisel.x, chisel.y, "#2ecc71"); }
+            else chisel.active = !chisel.active;
+        });
+
+        drawGlassButton(175, panelY+15, 140, 60, "#f39c12", "LOAD EXCAVATOR", () => {
+            if (mtv.state === 'IDLE_QUARRY' && brokenRocks > 0 && mtv.load < mtv.maxLoad) {
+                let amount = Math.min(brokenRocks, 15, mtv.maxLoad - mtv.load);
+                brokenRocks -= amount; mtv.load += amount; excavator.animTimer = 20;
+                addPopup(`+${amount} LBS`, mtv.x + 50, mtv.y - 40, "#fff");
+            }
+        });
+
+        drawGlassButton(330, panelY+15, 140, 60, mtv.state === 'IDLE_QUARRY' ? "#4a5320" : "#555", 
+            mtv.state === 'IDLE_QUARRY' ? "DISPATCH MTV" : "IN TRANSIT", () => {
+            if (mtv.state === 'IDLE_QUARRY' && mtv.load > 0) mtv.state = 'DRIVING_SAW';
+        });
+
+        // Saw Controls
+        ctx.fillStyle = "#fff"; ctx.font = "18px 'Teko'"; ctx.textAlign="left";
+        ctx.fillText("SAW SPEED:", 485, panelY + 30);
+        drawGlassButton(485, panelY+40, 50, 35, saw.speed === 0 ? "#2ecc71" : "#555", "OFF", () => { if(!saw.overheated) saw.speed = 0; });
+        drawGlassButton(545, panelY+40, 50, 35, saw.speed === 1 ? "#2ecc71" : "#555", "LOW", () => { if(!saw.overheated) saw.speed = 1; });
+        drawGlassButton(605, panelY+40, 50, 35, saw.speed === 2 ? "#2ecc71" : "#555", "MAX", () => { if(!saw.overheated) saw.speed = 2; });
+
+        // Heat Gauge
+        ctx.fillText("TEMP", 670, panelY + 30);
+        ctx.fillStyle = "#111"; ctx.fillRect(670, panelY+40, 80, 15);
+        let heatColor = saw.heat > 80 ? "#e74c3c" : (saw.heat > 50 ? "#f1c40f" : "#2ecc71");
+        ctx.fillStyle = heatColor; ctx.fillRect(670, panelY+40, (saw.heat/100)*80, 15);
+
+        drawGlassButton(765, panelY+15, 110, 60, "#3498db", "PUMP WATER", () => {
+            saw.water = Math.min(saw.maxWater, saw.water + 25);
+            saw.heat = Math.max(0, saw.heat - 15);
+            spawnParticles(saw.x + 75, saw.y - 20, "#3498db", 8, 'water');
+        });
+
+        // Build
+        drawGlassButton(890, panelY+15, 115, 60, "#95a5a6", "BUILD CABIN", () => {
+            if (cutRocks > 0) {
+                let buildAmt = cutRocks; cabinBlocks += buildAmt; cutRocks = 0;
+                addPopup(`+${buildAmt} PLACED`, 900, 400, "#fff");
+                spawnParticles(900, 420, "#bdc3c7", 10, 'rock');
+            }
+        });
+    }
+
+    function drawGlassButton(x, y, w, h, color, text, action) {
+        ctx.save();
+        // Base color
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.roundRect(x, y, w, h, 6) || ctx.rect(x, y, w, h); ctx.fill();
+        
+        // Glass highlight top
+        let grad = ctx.createLinearGradient(x, y, x, y + h/2);
+        grad.addColorStop(0, "rgba(255,255,255,0.3)"); grad.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.roundRect(x, y, w, h/2, {tl:6, tr:6, bl:0, br:0}) || ctx.rect(x, y, w, h/2); ctx.fill();
+        
+        // Shadow bottom
+        ctx.fillStyle = "rgba(0,0,0,0.4)";
+        ctx.beginPath(); ctx.roundRect(x, y+h-5, w, 5, {tl:0, tr:0, bl:6, br:6}) || ctx.rect(x, y+h-5, w, 5); ctx.fill();
+
+        ctx.strokeStyle = "#111"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(x, y, w, h, 6) || ctx.rect(x, y, w, h); ctx.stroke();
+
+        ctx.fillStyle = "#fff"; ctx.font = "20px 'Teko'";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        // Simple word wrap for small buttons
+        if (text.includes(" ") && w <= 115) {
+            let parts = text.split(" ");
+            ctx.fillText(parts[0], x + w/2, y + h/2 - 10);
+            ctx.fillText(parts[1], x + w/2, y + h/2 + 10);
+        } else {
+            ctx.fillText(text, x + w/2, y + h/2 + 2);
+        }
+        
+        ctx.restore();
+        buttons.push({x, y, w, h, action});
+    }
+
+    function drawStartScreen() {
+        ctx.fillStyle = "rgba(0,0,0,0.85)"; ctx.fillRect(0,0,canvas.width,canvas.height);
+        
+        ctx.fillStyle = "#f39c12"; ctx.font = "70px 'Teko'"; ctx.textAlign = "center";
+        ctx.shadowColor = "#e67e22"; ctx.shadowBlur = 10;
+        ctx.fillText("GRIND HARD ROCKS!", canvas.width/2, 220);
+        
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#bdc3c7"; ctx.font = "30px 'Teko'";
+        ctx.fillText("1000-Year Cabin Logistics Simulator", canvas.width/2, 270);
+
+        if (Math.floor(Date.now() / 600) % 2 === 0) {
+            ctx.fillStyle = "#2ecc71"; ctx.font = "35px 'Teko'";
+            ctx.fillText("TAP OR CLICK TO START", canvas.width/2, 400);
+        }
+    }
+
+    function drawWinScreen() {
+        ctx.fillStyle = "rgba(0,0,0,0.9)"; ctx.fillRect(0,0,canvas.width,canvas.height);
+
+        ctx.fillStyle = "#2ecc71"; ctx.font = "70px 'Teko'"; ctx.textAlign = "center";
+        ctx.fillText("CABIN COMPLETE!", canvas.width/2, 220);
+
+        ctx.fillStyle = "#fff"; ctx.font = "26px 'Teko'";
+        ctx.fillText("You successfully processed 1000 stones.", canvas.width/2, 280);
+        ctx.fillText("The Grind Hard plumbing co legacy is secured.", canvas.width/2, 320);
+
+        if (Math.floor(Date.now() / 600) % 2 === 0) {
+            ctx.fillStyle = "#f1c40f"; ctx.font = "35px 'Teko'";
+            ctx.fillText("TAP TO RESTART PIPELINE", canvas.width/2, 450);
+        }
+    }
+
+    // --- EFFECTS & PARTICLES ---
+    function spawnParticles(x, y, color, count, type) {
+        for(let i=0; i<count; i++) {
+            particles.push({
+                x: x, y: y,
+                vx: (Math.random() - 0.5) * 8,
+                vy: (Math.random() - 1) * 8,
+                life: 1.0, color: color, type: type,
+                size: Math.random() * 4 + 2
+            });
+        }
+    }
+
+    function updateParticles() {
+        for(let i = particles.length - 1; i >= 0; i--) {
+            let p = particles[i];
+            p.x += p.vx; p.y += p.vy;
+            p.vy += (p.type === 'smoke' ? -0.1 : 0.4); // Smoke goes up, rest falls
+            if(p.type === 'smoke') p.vx *= 0.95;
+            p.life -= (p.type === 'spark' ? 0.05 : 0.02);
+            if(p.life <= 0) particles.splice(i, 1);
+        }
+    }
+
+    function drawParticles() {
+        particles.forEach(p => {
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            if (p.type === 'water') {
+                ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
+            } else if (p.type === 'smoke') {
+                ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 2, 0, Math.PI*2); ctx.fill();
+            } else {
+                // jagged rocks/sparks
+                ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x+p.size, p.y+p.size/2); 
+                ctx.lineTo(p.x+p.size/2, p.y+p.size); ctx.closePath(); ctx.fill();
+            }
+            ctx.globalAlpha = 1.0;
+        });
+    }
+
+    function addPopup(text, x, y, color) { popups.push({ text, x, y, color, life: 1.0 }); }
+
+    function updatePopups() {
+        for(let i = popups.length - 1; i >= 0; i--) {
+            popups[i].y -= 0.8; popups[i].life -= 0.015;
+            if(popups[i].life <= 0) popups.splice(i, 1);
+        }
+    }
+
+    function drawPopups() {
+        ctx.textAlign = "center"; ctx.font = "20px 'Teko'";
+        popups.forEach(p => {
+            ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+            ctx.fillText(p.text, p.x, p.y);
+            ctx.globalAlpha = 1.0;
+        });
+    }
+
+    // Polyfill for roundRect on older browsers
+    if (!CanvasRenderingContext2D.prototype.roundRect) {
+        CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+            if (w < 2 * r) r = w / 2; if (h < 2 * r) r = h / 2;
+            this.beginPath(); this.moveTo(x+r, y); this.arcTo(x+w, y, x+w, y+h, r);
+            this.arcTo(x+w, y+h, x, y+h, r); this.arcTo(x, y+h, x, y, r);
+            this.arcTo(x, y, x+w, y, r); this.closePath(); return this;
+        }
+    }
+
+    function loop() { update(); draw(); requestAnimationFrame(loop); }
+    
+    // Webfont loading delay to ensure font renders
+    document.fonts.ready.then(function () { loop(); });
+
+</script>
+</body>
+</html>
