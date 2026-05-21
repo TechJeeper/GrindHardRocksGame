@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Grind Hard Rocks! - Mountain Pipeline</title>
+    <title>Grind Hard Rocks! - Mountain Cabin</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Teko:wght@500&display=swap');
 
@@ -66,15 +66,15 @@
     <div id="game-wrapper">
         <canvas id="gameCanvas" width="1024" height="576"></canvas>
         <div id="instructions">
-            <span style="color:#FFCC00; font-size: 20px;">OPERATIONS MANUAL:</span><br><br>
-            1. Toggle TEMU CHISEL to mine mountain.<br>
-            2. Tap EXCAVATOR to load the MTV.<br>
-            3. Tap MTV to dispatch to Saw.<br>
-            4. Set SAW SPEED (Low/High).<br>
-            5. Pump WATER to cool Saw.<br>
-            6. Tap BUILD to construct Cabin.
-        </div>
+        <span style="color:#FFCC00; font-size: 20px;">OPERATIONS MANUAL:</span><br><br>
+        1. Toggle TEMU CHISEL to mine mountain.<br>
+        2. Tap EXCAVATOR to load the MTV.<br>
+        3. Tap MTV to dispatch to Saw.<br>
+        4. Set SAW SPEED (Low/High).<br>
+        5. Pump WATER to cool Saw.<br>
+        6. Tap BUILD to construct Cabin.
     </div>
+</div>
 
 <script>
     const canvas = document.getElementById('gameCanvas');
@@ -90,9 +90,9 @@
     let cabinBlocks = 0;
 
     // Entities
-    const chisel = { active: false, broken: false, timer: 0, rate: 30, x: 120, y: 350, angle: 0 };
+    const chisel = { active: false, broken: false, timer: 0, rate: 45, x: 120, y: 350, angle: 0 };
     const excavator = { animTimer: 0, x: 230, y: 360 };
-    const mtv = { state: 'IDLE_QUARRY', load: 0, maxLoad: 50, x: 280, y: 420, targetX: 520, quarryX: 280 };
+    const mtv = { state: 'IDLE_QUARRY', load: 0, maxLoad: 12, x: 280, y: 420, targetX: 520, quarryX: 280 };
     const saw = { speed: 0, heat: 0, water: 100, maxWater: 100, overheated: false, timer: 0, bladeAngle: 0, x: 670, y: 380 };
     const honeybadger = { active: false, x: -100, y: 440, speed: 10, wheelRot: 0 };
 
@@ -156,9 +156,10 @@
             chisel.timer++;
             chisel.angle = Math.sin(chisel.timer * 0.8) * 0.1; // rapid vibration
             if (chisel.timer >= chisel.rate) {
-                brokenRocks += 2;
+                brokenRocks += 1; // Break 1 massive boulder
                 chisel.timer = 0;
-                spawnParticles(chisel.x - 20, chisel.y + 70, '#7b8a8b', 3, 'rock');
+                spawnParticles(chisel.x - 20, chisel.y + 70, '#7b8a8b', 1, 'boulder');
+                spawnParticles(chisel.x - 20, chisel.y + 70, '#5b6d6f', 3, 'rock');
                 
                 if (Math.random() < 0.05) { // Break chance
                     chisel.broken = true; chisel.active = false; chisel.angle = 0.5;
@@ -176,9 +177,9 @@
             if (mtv.x >= mtv.targetX) mtv.state = 'UNLOADING';
         } else if (mtv.state === 'UNLOADING') {
             if (mtv.load > 0) {
-                let drop = Math.min(mtv.load, 2);
+                let drop = 1; // Drop massive boulders
                 mtv.load -= drop; rawRocksAtSaw += drop;
-                spawnParticles(mtv.x + 90, mtv.y - 20, '#5b6d6f', 3, 'rock');
+                spawnParticles(mtv.x + 90, mtv.y - 20, '#5b6d6f', 1, 'boulder');
             } else { mtv.state = 'DRIVING_QUARRY'; }
         } else if (mtv.state === 'DRIVING_QUARRY') {
             mtv.x -= 4;
@@ -191,11 +192,11 @@
             
             if (rawRocksAtSaw > 0) {
                 saw.timer++;
-                let processRate = saw.speed === 1 ? 30 : 15;
+                let processRate = saw.speed === 1 ? 60 : 30; // takes longer to cut a boulder
                 if (saw.timer >= processRate) {
-                    rawRocksAtSaw--; cutRocks++; saw.timer = 0;
-                    spawnParticles(saw.x - 20, saw.y, '#999', 3, 'rock');
-                    spawnParticles(saw.x, saw.y - 20, '#FFA500', 2, 'spark');
+                    rawRocksAtSaw--; cutRocks += 5; saw.timer = 0; // 1 boulder yields 5 slabs
+                    spawnParticles(saw.x - 20, saw.y, '#999', 5, 'rock');
+                    spawnParticles(saw.x, saw.y - 20, '#FFA500', 3, 'spark');
                 }
             }
 
@@ -326,12 +327,23 @@
         ctx.beginPath(); ctx.moveTo(40, 200); ctx.lineTo(70, 260); ctx.lineTo(140, 300); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(80, 260); ctx.lineTo(100, 350); ctx.stroke();
         
-        // Pile of broken rocks
+        // Pile of massive boulders
         if (brokenRocks > 0) {
             ctx.fillStyle = "#95a5a6";
-            ctx.beginPath();
-            ctx.arc(160, 430, Math.min(40, 10 + brokenRocks), Math.PI, 0);
-            ctx.fill();
+            ctx.strokeStyle = "#2c3e50";
+            ctx.lineWidth = 2;
+            let displayCount = Math.min(brokenRocks, 20);
+            for(let i=0; i<displayCount; i++) {
+                ctx.beginPath();
+                // pseudo-random pile stacking
+                let bx = 130 + (i % 6) * 16 + (Math.sin(i)*5);
+                let by = 440 - Math.floor(i / 6) * 14;
+                ctx.arc(bx, by, 12, 0, Math.PI*2);
+                ctx.fill();
+                ctx.stroke();
+                // small detail line on boulder
+                ctx.beginPath(); ctx.moveTo(bx-5, by-2); ctx.lineTo(bx+2, by+4); ctx.stroke();
+            }
         }
         ctx.restore();
     }
@@ -483,13 +495,19 @@
         ctx.fillStyle = "#2a3015";
         ctx.fillRect(10, -25, 5, 20); ctx.fillRect(30, -25, 5, 20); ctx.fillRect(50, -25, 5, 20);
 
-        // Rocks in bed
+        // Massive Boulders in bed
         if (mtv.load > 0) {
             ctx.fillStyle = "#7f8c8d";
-            let h = (mtv.load / mtv.maxLoad) * 20;
-            ctx.fillRect(5, -30 - h, 55, h);
-            // Jagged top
-            ctx.beginPath(); ctx.moveTo(5, -30-h); ctx.lineTo(20, -35-h); ctx.lineTo(40, -28-h); ctx.lineTo(60, -30-h); ctx.fill();
+            ctx.strokeStyle = "#2c3e50";
+            ctx.lineWidth = 2;
+            for(let i=0; i<mtv.load; i++) {
+                ctx.beginPath();
+                let bx = 15 + (i % 4) * 14;
+                let by = -28 - Math.floor(i / 4) * 12;
+                ctx.arc(bx, by, 9, 0, Math.PI*2);
+                ctx.fill();
+                ctx.stroke();
+            }
         }
 
         ctx.rotate(-bedAngle);
@@ -529,10 +547,29 @@
         ctx.fillRect(-25, 10, 70, 5);
         ctx.fillRect(-15, -20, 20, 20); // Motor housing
 
-        // Raw rock pile waiting to be cut
+        // Massive boulders waiting to be cut
         if (rawRocksAtSaw > 0) {
             ctx.fillStyle = "#95a5a6";
-            ctx.fillRect(45, 20, Math.min(30, rawRocksAtSaw * 2), 20);
+            ctx.strokeStyle = "#2c3e50";
+            ctx.lineWidth = 2;
+            let displayWait = Math.min(rawRocksAtSaw, 6);
+            for(let i=0; i<displayWait; i++) {
+                ctx.beginPath();
+                let bx = 55 + (i%2)*12;
+                let by = 35 - Math.floor(i/2)*14;
+                ctx.arc(bx, by, 10, 0, Math.PI*2);
+                ctx.fill();
+                ctx.stroke();
+            }
+            
+            // Boulder currently being cut (right under blade)
+            ctx.beginPath();
+            ctx.arc(0, -10, 16, 0, Math.PI*2);
+            ctx.fill();
+            ctx.stroke();
+            // Cut line halfway through
+            ctx.strokeStyle = "#fff";
+            ctx.beginPath(); ctx.moveTo(-10, -25); ctx.lineTo(0, -10); ctx.stroke();
         }
 
         // Circular Blade
@@ -649,9 +686,9 @@
         ctx.font = "22px 'Teko', sans-serif";
         ctx.textAlign = "center";
         
-        ctx.fillText(`RAW MINED: ${brokenRocks}`, 150, 48);
+        ctx.fillText(`BOULDERS MINED: ${brokenRocks}`, 150, 48);
         ctx.fillText(`AT SAW: ${rawRocksAtSaw}`, 380, 48);
-        ctx.fillText(`CUT STONES: ${cutRocks}`, 620, 48);
+        ctx.fillText(`SLABS: ${cutRocks}`, 620, 48);
         
         ctx.fillStyle = "#2ecc71";
         ctx.font = "26px 'Teko', sans-serif";
@@ -666,16 +703,16 @@
 
         // Quarry Controls
         drawGlassButton(20, panelY+15, 140, 60, chisel.broken ? "#c0392b" : (chisel.active ? "#7f8c8d" : "#d35400"), 
-            chisel.broken ? "FIX CHISEL" : (chisel.active ? "CHISEL ON" : "CHISEL OFF"), () => {
+            chisel.broken ? "FIX TEMU CHISEL" : (chisel.active ? "TEMU CHISEL ON" : "TEMU CHISEL OFF"), () => {
             if (chisel.broken) { chisel.broken = false; chisel.active = true; addPopup("FIXED!", chisel.x, chisel.y, "#2ecc71"); }
             else chisel.active = !chisel.active;
         });
 
         drawGlassButton(175, panelY+15, 140, 60, "#f39c12", "LOAD EXCAVATOR", () => {
             if (mtv.state === 'IDLE_QUARRY' && brokenRocks > 0 && mtv.load < mtv.maxLoad) {
-                let amount = Math.min(brokenRocks, 15, mtv.maxLoad - mtv.load);
+                let amount = Math.min(brokenRocks, 4, mtv.maxLoad - mtv.load); // Loads up to 4 massive boulders per scoop
                 brokenRocks -= amount; mtv.load += amount; excavator.animTimer = 20;
-                addPopup(`+${amount} LBS`, mtv.x + 50, mtv.y - 40, "#fff");
+                addPopup(`+${amount} BOULDERS`, mtv.x + 50, mtv.y - 40, "#fff");
             }
         });
 
@@ -812,6 +849,8 @@
                 ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill();
             } else if (p.type === 'smoke') {
                 ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 2, 0, Math.PI*2); ctx.fill();
+            } else if (p.type === 'boulder') {
+                ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 3, 0, Math.PI*2); ctx.fill();
             } else {
                 // jagged rocks/sparks
                 ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x+p.size, p.y+p.size/2); 
